@@ -1,69 +1,256 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  IconSettings,
+  IconWallet,
+  IconArrowUpRight,
+  IconArrowDownLeft,
+  IconBuildingBank,
+  IconDots,
+  IconEye,
+  IconEyeOff,
+  IconCalendarEvent,
+  IconCreditCard,
+  IconId,
+  IconTarget
+} from "@tabler/icons-react";
+
+export default function Dashboard() {
+  const router = useRouter();
+  const [isMainBalanceVisible, setIsMainBalanceVisible] = useState(true);
+  const [isTotalVisible, setIsTotalVisible] = useState(true);
+  const [filterType, setFilterType] = useState("Bulanan");
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <>
+      {/* Left Column */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "2rem", minWidth: 0, width: "100%" }}>
+        {/* Balance Card */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <IconWallet size={20} color="#3b82f6" />
+              Total Tabungan Saya
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem", fontWeight: 500, backgroundColor: "#f3f4f6", padding: "0.25rem 0.5rem", borderRadius: "8px" }}>
+              IDR
+            </div>
+          </div>
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <div className="balance-amount" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                {isMainBalanceVisible ? "Rp 8.470.000" : "Rp ••.•••.•••"} 
+                {isMainBalanceVisible ? (
+                  <IconEye 
+                    size={24} 
+                    color="#9ca3af" 
+                    style={{ cursor: 'pointer' }} 
+                    onClick={() => setIsMainBalanceVisible(false)} 
+                  />
+                ) : (
+                  <IconEyeOff 
+                    size={24} 
+                    color="#9ca3af" 
+                    style={{ cursor: 'pointer' }} 
+                    onClick={() => setIsMainBalanceVisible(true)} 
+                  />
+                )}
+              </div>
+              <div className="balance-change">
+                <span className="badge-success">+12.4%</span>
+                <span className="hide-on-mobile">Kenaikan saldo, progress bagus</span>
+              </div>
+            </div>
+
+            {/* Mini Block Chart */}
+            <div className="mini-chart">
+              <div>
+                <div style={{ backgroundColor: '#e4f7a1' }}></div>
+              </div>
+              <div>
+                <div style={{ backgroundColor: '#d4f276' }}></div>
+              </div>
+              <div>
+                <div style={{ backgroundColor: '#aecbf7' }}></div>
+                <div style={{ backgroundColor: '#d4f276' }}></div>
+                <div style={{ backgroundColor: '#e4f7a1' }}></div>
+                <div style={{ backgroundColor: '#b6d0f5' }}></div>
+              </div>
+              <div>
+                <div style={{ backgroundColor: '#87b4f5' }}></div>
+                <div style={{ backgroundColor: '#b6d0f5' }}></div>
+              </div>
+              <div>
+                <div style={{ backgroundColor: '#d4f276' }}></div>
+                <div style={{ backgroundColor: '#3984f8' }}></div>
+                <div style={{ backgroundColor: '#87b4f5' }}></div>
+              </div>
+              <div>
+                <div style={{ backgroundColor: '#3984f8' }}></div>
+                <div style={{ backgroundColor: '#bde03c' }}></div>
+              </div>
+              <div>
+                <div style={{ backgroundColor: '#135ff0' }}></div>
+                <div style={{ backgroundColor: '#3984f8' }}></div>
+                <div style={{ backgroundColor: '#bde03c' }}></div>
+                <div style={{ backgroundColor: '#87b4f5' }}></div>
+                <div style={{ backgroundColor: '#c5d9f7' }}></div>
+              </div>
+            </div>
+          </div>
+
+          <div className="action-buttons" style={{ flexWrap: 'wrap', overflow: 'visible', paddingBottom: '0.5rem', alignItems: 'center' }}>
+            <button className="btn btn-primary" onClick={() => router.push('/balance')}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', backgroundColor: 'white', borderRadius: '50%', color: '#3b82f6' }}>
+                <IconCreditCard size={16} />
+              </div>
+              Informasi
+            </button>
+            <button className="btn btn-secondary" onClick={() => router.push('/balance')}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', backgroundColor: 'white', borderRadius: '50%', color: '#111827' }}>
+                <IconTarget size={16} />
+              </div>
+              Target
+            </button>
+            <div style={{ position: 'relative' }}>
+              <button className="btn-icon" onClick={() => setIsActionMenuOpen(!isActionMenuOpen)}>
+                <IconDots size={18} />
+              </button>
+              {isActionMenuOpen && (
+                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '0.5rem', backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', border: '1px solid #e5e7eb', zIndex: 20, width: '120px' }}>
+                  <div onClick={() => router.push('/settings')} style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }} className="hover:bg-gray-50">
+                    <IconSettings size={14} /> Setting
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Pencapaian Target Card */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+          <div className="card-header" style={{ marginBottom: '2rem' }}>
+            <div className="card-title">
+              <IconSettings size={20} color="#3b82f6" />
+              Pencapaian Target
+            </div>
+            <button className="btn-icon" style={{ border: 'none', background: 'transparent' }}>
+              <IconDots size={18} color="#6b7280" />
+            </button>
+          </div>
+
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingBottom: '1rem' }}>
+            <div style={{ position: 'relative', width: '100%', height: '150px', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+              <svg width="280" height="150" viewBox="0 0 280 150" style={{ overflow: 'visible' }}>
+                {Array.from({ length: 24 }).map((_, i) => {
+                  const isActive = i < Math.round((70.8 / 100) * 24);
+                  const angle = -90 + (i * (180 / 23)); // 23 spaces between 24 items
+                  return (
+                    <rect
+                      key={i}
+                      x="135" // 140 - 5
+                      y="10"
+                      width="10"
+                      height="40"
+                      rx="5"
+                      fill={isActive ? "#3b82f6" : "#eff6ff"} 
+                      transform={`rotate(${angle}, 140, 140)`}
+                    />
+                  );
+                })}
+              </svg>
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'translateY(10px)' }}>
+                <h4 style={{ fontSize: '2.5rem', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1 }}>70.8%</h4>
+                <p style={{ fontSize: '0.875rem', color: '#6b7280', fontWeight: 500, marginTop: '0.25rem' }}>Pertumbuhan Tabungan</p>
+              </div>
+            </div>
+          </div>
         </div>
-      </main>
-    </div>
+      </div>
+
+      {/* Right Column */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "2rem", minWidth: 0, width: "100%" }}>
+        {/* Payment Overview */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">
+              <IconSettings size={20} color="#3b82f6" />
+              Presentase
+            </div>
+            <div style={{ position: "relative" }}>
+              <div 
+                onClick={() => setIsFilterOpen(!isFilterOpen)}
+                style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem", backgroundColor: "#f3f4f6", padding: "0.25rem 0.75rem", borderRadius: "999px", cursor: 'pointer' }}
+              >
+                <IconCalendarEvent size={16} /> {filterType} <IconDots size={14} />
+              </div>
+              
+              {isFilterOpen && (
+                <div style={{ position: "absolute", top: "100%", right: 0, marginTop: "0.5rem", backgroundColor: "white", borderRadius: "0.5rem", boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)", border: "1px solid #e5e7eb", zIndex: 10, overflow: "hidden" }}>
+                  {["Harian", "Mingguan", "Bulanan", "Tahunan"].map((type) => (
+                    <div 
+                      key={type}
+                      onClick={() => { setFilterType(type); setIsFilterOpen(false); }}
+                      style={{ padding: "0.5rem 1rem", fontSize: "0.875rem", cursor: "pointer", backgroundColor: filterType === type ? "#eff6ff" : "white", color: filterType === type ? "#3b82f6" : "#374151" }}
+                    >
+                      {type}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: "1rem", color: "#6b7280", fontSize: "0.875rem" }}>Total Tabungan</div>
+          <div className="balance-amount">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {isTotalVisible ? "Rp 25.847.000" : "Rp ••.•••.•••"}
+              {isTotalVisible ? (
+                <IconEye size={24} color="#9ca3af" style={{ cursor: 'pointer' }} onClick={() => setIsTotalVisible(false)} />
+              ) : (
+                <IconEyeOff size={24} color="#9ca3af" style={{ cursor: 'pointer' }} onClick={() => setIsTotalVisible(true)} />
+              )}
+            </div>
+          </div>
+          <div className="balance-change" style={{ marginBottom: "1.5rem" }}>
+            <span className="badge-success">+6.9%</span>
+            <span>vs bulan lalu</span>
+          </div>
+
+          <div className="chart-container">
+            <div className="chart-bar-group">
+              <div className="chart-bar-value">Rp 12M</div>
+              <div className="chart-bar" style={{ height: "120px", opacity: 0.8 }}></div>
+              <div className="chart-bar-label">Minggu 1</div>
+            </div>
+            <div className="chart-bar-group">
+              <div className="chart-bar-value">Rp 8M</div>
+              <div className="chart-bar" style={{ height: "80px", opacity: 0.6 }}></div>
+              <div className="chart-bar-label">Minggu 2</div>
+            </div>
+            <div className="chart-bar-group">
+              <div className="chart-bar-value">Rp 15M</div>
+              <div className="chart-bar" style={{ height: "150px", opacity: 0.9 }}></div>
+              <div className="chart-bar-label">Minggu 3</div>
+            </div>
+            <div className="chart-bar-group">
+              <div className="chart-bar-value">Rp 9M</div>
+              <div className="chart-bar" style={{ height: "90px", opacity: 0.7 }}></div>
+              <div className="chart-bar-label">Minggu 4</div>
+            </div>
+            <div className="chart-bar-group">
+              <div className="chart-bar-value">Rp 20M</div>
+              <div className="chart-bar" style={{ height: "200px", opacity: 1 }}></div>
+              <div className="chart-bar-label">Minggu 5</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
