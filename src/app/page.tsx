@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   IconSettings,
@@ -16,6 +16,7 @@ import {
   IconId,
   IconTarget
 } from "@tabler/icons-react";
+import { supabase } from "@/lib/supabase";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -24,6 +25,35 @@ export default function Dashboard() {
   const [filterType, setFilterType] = useState("Bulanan");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+  
+  const [balance, setBalance] = useState(0);
+  const [currentSavingsTarget, setCurrentSavingsTarget] = useState(12000000);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      setIsLoading(true);
+      // fetch target
+      const { data: targetData } = await supabase.from('savings_target').select('amount').eq('id', 1).single();
+      if (targetData) setCurrentSavingsTarget(Number(targetData.amount));
+
+      const { data, error } = await supabase.from('transactions').select('type, amount');
+      if (!error && data) {
+        let total = 0;
+        data.forEach(txn => {
+          if (txn.type === 'deposit') total += Number(txn.amount);
+          else if (txn.type === 'expense') total -= Number(txn.amount);
+        });
+        setBalance(total);
+      }
+      setIsLoading(false);
+    }
+    fetchData();
+  }, []);
+
+  const formatRp = (num: number) => {
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
+  };
 
   return (
     <>
@@ -44,7 +74,7 @@ export default function Dashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
             <div>
               <div className="balance-amount" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                {isMainBalanceVisible ? "Rp 8.470.000" : "Rp ••.•••.•••"} 
+                {isLoading ? "Memuat..." : (isMainBalanceVisible ? formatRp(balance) : "Rp ••.•••.•••")} 
                 {isMainBalanceVisible ? (
                   <IconEye 
                     size={24} 
@@ -148,7 +178,8 @@ export default function Dashboard() {
             <div style={{ position: 'relative', width: '100%', height: '150px', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
               <svg width="280" height="150" viewBox="0 0 280 150" style={{ overflow: 'visible' }}>
                 {Array.from({ length: 24 }).map((_, i) => {
-                  const isActive = i < Math.round((70.8 / 100) * 24);
+                  const progressPct = currentSavingsTarget > 0 ? (balance / currentSavingsTarget) * 100 : 0;
+                  const isActive = i < Math.round((progressPct / 100) * 24);
                   const angle = -90 + (i * (180 / 23)); // 23 spaces between 24 items
                   return (
                     <rect
@@ -165,7 +196,7 @@ export default function Dashboard() {
                 })}
               </svg>
               <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'translateY(10px)' }}>
-                <h4 style={{ fontSize: '2.5rem', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1 }}>70.8%</h4>
+                <h4 style={{ fontSize: '2.5rem', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1 }}>{currentSavingsTarget > 0 ? ((balance / currentSavingsTarget) * 100).toFixed(1) : 0}%</h4>
                 <p style={{ fontSize: '0.875rem', color: '#6b7280', fontWeight: 500, marginTop: '0.25rem' }}>Pertumbuhan Tabungan</p>
               </div>
             </div>
@@ -209,7 +240,7 @@ export default function Dashboard() {
           <div style={{ marginBottom: "1rem", color: "#6b7280", fontSize: "0.875rem" }}>Total Tabungan</div>
           <div className="balance-amount">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              {isTotalVisible ? "Rp 25.847.000" : "Rp ••.•••.•••"}
+              {isLoading ? "Memuat..." : (isTotalVisible ? formatRp(balance) : "Rp ••.•••.•••")}
               {isTotalVisible ? (
                 <IconEye size={24} color="#9ca3af" style={{ cursor: 'pointer' }} onClick={() => setIsTotalVisible(false)} />
               ) : (

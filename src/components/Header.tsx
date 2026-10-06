@@ -16,6 +16,8 @@ import {
   IconSettings,
   IconLogout
 } from "@tabler/icons-react";
+import { supabase } from "@/lib/supabase";
+import { getProfilePictureUrl } from "@/lib/s3";
 
 export default function Header() {
   const pathname = usePathname();
@@ -23,6 +25,32 @@ export default function Header() {
   const [currentDate, setCurrentDate] = useState("");
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  
+  const [userEmail, setUserEmail] = useState("raaakb87@gmail.com");
+  const [userName, setUserName] = useState("Radhiyya");
+  const [userFullName, setUserFullName] = useState("Radhiyya");
+  const [profilePic, setProfilePic] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadUserData() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUserEmail(session.user.email || "raaakb87@gmail.com");
+        const metadata = session.user.user_metadata;
+        if (metadata?.nickname) setUserName(metadata.nickname);
+        if (metadata?.full_name) setUserFullName(metadata.full_name);
+        
+        // Fetch profile pic from S3 dynamically per user
+        const url = await getProfilePictureUrl(`profile-${session.user.id}.jpg`); 
+        if (url) {
+          setProfilePic(url);
+        }
+      }
+    }
+    loadUserData();
+  }, []);
 
   useEffect(() => {
     const formatter = new Intl.DateTimeFormat("id-ID", {
@@ -109,8 +137,12 @@ export default function Header() {
             )}
           </div>
           <div style={{ position: "relative" }}>
-            <button className="icon-btn" onClick={() => setIsProfileOpen(!isProfileOpen)}>
-              <IconUser size={18} />
+            <button className="icon-btn" onClick={() => setIsProfileOpen(!isProfileOpen)} style={{ padding: profilePic ? 0 : undefined, overflow: "hidden" }}>
+              {profilePic ? (
+                <img src={profilePic} alt="Profile" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
+              ) : (
+                <IconUser size={18} />
+              )}
             </button>
             
             {isProfileOpen && (
@@ -129,8 +161,8 @@ export default function Header() {
                 flexDirection: "column"
               }}>
                 <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid var(--border)" }}>
-                  <p style={{ fontWeight: 600, fontSize: "0.875rem", margin: 0 }}>Radhiyya</p>
-                  <p style={{ fontSize: "0.75rem", color: "#6b7280", margin: 0 }}>radhiyya@example.com</p>
+                  <p style={{ fontWeight: 600, fontSize: "0.875rem", margin: 0 }}>{userFullName}</p>
+                  <p style={{ fontSize: "0.75rem", color: "#6b7280", margin: 0 }}>{userEmail}</p>
                 </div>
                 <div style={{ padding: "0.5rem" }}>
                   <button 
@@ -151,7 +183,7 @@ export default function Header() {
                   <button 
                     onClick={() => {
                       setIsProfileOpen(false);
-                      router.push('/login');
+                      setShowLogoutConfirm(true);
                     }}
                     style={{ 
                       width: "100%", padding: "0.5rem 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem",
@@ -173,7 +205,7 @@ export default function Header() {
       <div className="header-content">
         <p className="header-date">{currentDate}</p>
         <h1 className="header-greeting">
-          Selamat Pagi, <span>Radhiyya</span>
+          Selamat Pagi, <span>{userName}</span>
         </h1>
 
         <div className="nav-tabs">
@@ -192,6 +224,45 @@ export default function Header() {
           </Link>
         </div>
       </div>
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutConfirm && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0, 0, 0, 0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(5px)" }}>
+          <div style={{ backgroundColor: "var(--card-bg)", borderRadius: "1.5rem", padding: "2rem", width: "90%", maxWidth: "400px", boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+            <div style={{ width: "60px", height: "60px", borderRadius: "50%", backgroundColor: "#fee2e2", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "1.5rem" }}>
+              <IconLogout size={32} color="#ef4444" />
+            </div>
+            <h3 style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--foreground)", marginBottom: "0.5rem", marginTop: 0 }}>Keluar dari Akun?</h3>
+            <p style={{ color: "#6b7280", marginBottom: "2rem", lineHeight: 1.5 }}>Apakah Anda yakin ingin keluar dari Smart Tabungan? Sesi Anda akan diakhiri.</p>
+            <div style={{ display: "flex", gap: "1rem", width: "100%" }}>
+              <button 
+                onClick={() => setShowLogoutConfirm(false)}
+                style={{ flex: 1, padding: "0.875rem", borderRadius: "1rem", border: "1px solid var(--border)", backgroundColor: "transparent", color: "var(--foreground)", fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#f3f4f6"}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                disabled={isLoggingOut}
+              >
+                Batal
+              </button>
+              <button 
+                onClick={async () => {
+                  setIsLoggingOut(true);
+                  await supabase.auth.signOut();
+                  router.push('/login');
+                }}
+                style={{ flex: 1, padding: "0.875rem", borderRadius: "1rem", border: "none", backgroundColor: "#ef4444", color: "white", fontWeight: 600, cursor: "pointer", transition: "all 0.2s", display: "flex", justifyContent: "center", alignItems: "center" }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#dc2626"}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = "#ef4444"}
+                disabled={isLoggingOut}
+              >
+                {isLoggingOut ? (
+                  <div className="spinner" style={{ width: "20px", height: "20px", border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                ) : "Ya, Keluar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   IconUser, 
   IconMail, 
@@ -12,16 +12,78 @@ import {
   IconCheck
 } from "@tabler/icons-react";
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
+import { supabase } from "@/lib/supabase";
+import { getProfilePictureUrl } from "@/lib/s3";
 
 export default function Settings() {
   const [showPassword, setShowPassword] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [profilePic, setProfilePic] = useState<string | null>(null);
+  const [imgError, setImgError] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
-    fullName: 'Radhiyya',
-    nickname: 'Radhiyya',
-    email: 'radhiyya@gmail.com',
-    password: 'password123'
+    fullName: '',
+    nickname: '',
+    email: '',
+    password: ''
   });
+
+  useEffect(() => {
+    async function loadData() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const metadata = session.user.user_metadata || {};
+        setFormData({
+          fullName: metadata.full_name || 'Radhiyya',
+          nickname: metadata.nickname || 'Radhiyya',
+          email: session.user.email || 'radhiyya@gmail.com',
+          password: '••••••••'
+        });
+        setUserId(session.user.id);
+        const picUrl = await getProfilePictureUrl(`profile-${session.user.id}.jpg`);
+        if (picUrl) setProfilePic(picUrl);
+      }
+      
+      setIsLoading(false);
+    }
+    loadData();
+  }, []);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setIsUploading(true);
+      try {
+        const file = e.target.files[0];
+        const formDataUpload = new FormData();
+        formDataUpload.append('file', file);
+        if (userId) {
+          formDataUpload.append('userId', userId);
+        }
+        
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formDataUpload
+        });
+        
+        if (res.ok) {
+          const newUrl = await getProfilePictureUrl(`profile-${userId}.jpg`);
+          if (newUrl) {
+            setProfilePic(newUrl);
+            setImgError(false);
+          }
+        } else {
+          const errData = await res.json();
+          alert(`Gagal mengunggah foto profil: ${errData.error || 'Unknown error'}`);
+        }
+      } finally {
+        setIsUploading(false);
+      }
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -30,12 +92,25 @@ export default function Settings() {
     });
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setShowSuccessModal(true);
-    setTimeout(() => {
-      setShowSuccessModal(false);
-    }, 2500);
+    setIsSaving(true);
+    
+    const { error } = await supabase.auth.updateUser({
+      data: { 
+        full_name: formData.fullName, 
+        nickname: formData.nickname 
+      }
+    });
+    
+    setIsSaving(false);
+    
+    if (!error) {
+      setShowSuccessModal(true);
+      setTimeout(() => setShowSuccessModal(false), 2500);
+    } else {
+      alert("Gagal menyimpan: " + error.message);
+    }
   };
 
   return (
@@ -43,10 +118,35 @@ export default function Settings() {
         {/* Profile Card */}
         <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1.5rem", padding: "3rem 2rem" }}>
           <div style={{ position: "relative", width: "140px", height: "140px" }}>
-            <div style={{ width: "140px", height: "140px", borderRadius: "50%", backgroundColor: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", color: "#3b82f6", fontSize: "4rem", fontWeight: "bold" }}>
-              {formData.nickname.charAt(0).toUpperCase()}
+            <div style={{ width: "140px", height: "140px", borderRadius: "50%", backgroundColor: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", color: "#3b82f6", fontSize: "4rem", fontWeight: "bold", overflow: "hidden", position: "relative" }}>
+              {isUploading && (
+                <div style={{ position: "absolute", inset: 0, backgroundColor: "rgba(255, 255, 255, 0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+                  <div className="spinner" style={{ width: "30px", height: "30px", border: "3px solid #3b82f6", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                </div>
+              )}
+              {profilePic && !imgError ? (
+                <img 
+                  src={profilePic} 
+                  alt="Profile" 
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }} 
+                  onError={() => setImgError(true)}
+                />
+              ) : (
+                formData.nickname.charAt(0).toUpperCase()
+              )}
             </div>
-            <button className="btn-icon" style={{ position: "absolute", bottom: "5px", right: "5px", width: "40px", height: "40px", backgroundColor: "#3b82f6", color: "white", border: "none", boxShadow: "0 4px 6px -1px rgba(59, 130, 246, 0.5)" }}>
+            <input 
+              type="file" 
+              accept="image/*" 
+              ref={fileInputRef} 
+              style={{ display: "none" }} 
+              onChange={handleFileChange} 
+            />
+            <button 
+              className="btn-icon" 
+              onClick={() => fileInputRef.current?.click()}
+              style={{ position: "absolute", bottom: "5px", right: "5px", width: "40px", height: "40px", backgroundColor: "#3b82f6", color: "white", border: "none", boxShadow: "0 4px 6px -1px rgba(59, 130, 246, 0.5)", cursor: "pointer" }}
+            >
               <IconCamera size={20} />
             </button>
           </div>
@@ -142,8 +242,8 @@ export default function Settings() {
             </div>
 
             <div style={{ marginTop: "1rem" }}>
-              <button type="submit" className="btn btn-primary" style={{ width: "100%" }}>
-                <IconCheck size={18} /> Simpan Perubahan
+              <button type="submit" className="btn btn-primary" style={{ width: "100%" }} disabled={isSaving}>
+                <IconCheck size={18} /> {isSaving ? "Menyimpan..." : "Simpan Perubahan"}
               </button>
             </div>
             

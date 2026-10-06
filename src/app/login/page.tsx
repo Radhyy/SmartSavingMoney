@@ -4,20 +4,37 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { IconMail, IconLock, IconEye, IconEyeOff, IconArrowRight } from '@tabler/icons-react';
+import { supabase } from '@/lib/supabase';
 
 export default function LoginPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    // Simulate login delay
-    setTimeout(() => {
+    setErrorMsg('');
+    
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: formData.email,
+        password: formData.password,
+      });
+
+      if (error) {
+        setErrorMsg(error.message);
+        setIsLoading(false);
+        return;
+      }
+
       router.push('/');
-    }, 1200);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Terjadi kesalahan saat login.');
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -91,6 +108,11 @@ export default function LoginPage() {
             Silakan masuk ke akun Smart Tabungan Anda
           </p>
         </div>
+        {errorMsg && (
+          <div style={{ padding: '0.75rem', backgroundColor: '#fee2e2', color: '#b91c1c', borderRadius: '0.5rem', fontSize: '0.875rem', textAlign: 'center', marginBottom: '1rem' }}>
+            {errorMsg}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div style={{ position: 'relative' }}>
