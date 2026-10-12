@@ -32,6 +32,9 @@ export default function Header() {
   const [userName, setUserName] = useState("Radhiyya");
   const [userFullName, setUserFullName] = useState("Radhiyya");
   const [profilePic, setProfilePic] = useState<string | null>(null);
+  
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     async function loadUserData() {
@@ -60,6 +63,56 @@ export default function Header() {
       year: "numeric",
     });
     setCurrentDate(formatter.format(new Date()));
+    
+    // Load initial notifications
+    const loadInitialNotifications = async () => {
+      const { data: txns } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(5);
+        
+      if (txns) {
+        const initialNotifs = txns.map(tx => ({
+          id: tx.id,
+          title: tx.type === 'deposit' ? 'Setoran Berhasil' : 'Penarikan Tunai',
+          message: tx.type === 'deposit' 
+            ? `Uang sebesar Rp ${Number(tx.amount).toLocaleString('id-ID')} berhasil disetorkan ke tabungan.`
+            : `Penarikan Rp ${Number(tx.amount).toLocaleString('id-ID')} dilakukan.`,
+          time: new Date(tx.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+          read: true,
+          type: tx.type
+        }));
+        setNotifications(initialNotifs);
+      }
+    };
+    
+    loadInitialNotifications();
+
+    // Setup Supabase Realtime Listener
+    const channel = supabase
+      .channel('realtime_transactions')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'transactions' }, (payload) => {
+        const tx = payload.new;
+        const newNotif = {
+          id: tx.id,
+          title: tx.type === 'deposit' ? 'Setoran Berhasil' : 'Penarikan Tunai',
+          message: tx.type === 'deposit' 
+            ? `Uang sebesar Rp ${Number(tx.amount).toLocaleString('id-ID')} berhasil disetorkan ke tabungan.`
+            : `Penarikan Rp ${Number(tx.amount).toLocaleString('id-ID')} dilakukan.`,
+          time: new Date(tx.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+          read: false,
+          type: tx.type
+        };
+        
+        setNotifications(prev => [newNotif, ...prev]);
+        setUnreadCount(prev => prev + 1);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return (
@@ -68,13 +121,12 @@ export default function Header() {
       <div className="header-top">
         <div className="logo">
           <Image 
-            src="/SmartTabunganLogo3.png" 
+            src="/logo-text.png" 
             alt="Smart Tabungan Logo" 
-            width={56} 
-            height={56} 
+            width={120} 
+            height={40} 
             style={{ objectFit: "contain" }} 
           />
-          <span>Smart Tabungan</span>
         </div>
 
         <div className="header-actions">
@@ -85,7 +137,9 @@ export default function Header() {
           <div style={{ position: "relative" }}>
             <button className="icon-btn" onClick={() => setIsNotifOpen(!isNotifOpen)}>
               <IconBell size={18} />
-              <span style={{ position: "absolute", top: 8, right: 8, width: 8, height: 8, backgroundColor: "#ef4444", borderRadius: "50%" }}></span>
+              {unreadCount > 0 && (
+                <span style={{ position: "absolute", top: 8, right: 8, width: 8, height: 8, backgroundColor: "#ef4444", borderRadius: "50%" }}></span>
+              )}
             </button>
             {isNotifOpen && (
               <div style={{
@@ -102,33 +156,33 @@ export default function Header() {
               }}>
                 <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <h3 style={{ fontSize: "1rem", fontWeight: 600, margin: 0 }}>Notifikasi</h3>
-                  <span style={{ fontSize: "0.75rem", color: "#3b82f6", cursor: "pointer", fontWeight: 500 }}>Tandai sudah dibaca</span>
+                  <span 
+                    style={{ fontSize: "0.75rem", color: "#3b82f6", cursor: "pointer", fontWeight: 500 }}
+                    onClick={() => {
+                      setUnreadCount(0);
+                      setNotifications(notifications.map(n => ({ ...n, read: true })));
+                    }}
+                  >
+                    Tandai sudah dibaca
+                  </span>
                 </div>
                 <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-                  <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid var(--border)", display: "flex", gap: "1rem", backgroundColor: "#f0f9ff" }}>
-                    <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#3b82f6", marginTop: "6px", flexShrink: 0 }}></div>
-                    <div>
-                      <p style={{ fontSize: "0.875rem", fontWeight: 600, margin: "0 0 0.25rem 0" }}>Setoran Berhasil</p>
-                      <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: 0 }}>Uang sebesar Rp 50.000 berhasil disetorkan ke tabungan.</p>
-                      <p style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "0.25rem" }}>Baru saja</p>
+                  {notifications.length === 0 ? (
+                    <div style={{ padding: "2rem", textAlign: "center", color: "#6b7280", fontSize: "0.875rem" }}>
+                      Belum ada notifikasi
                     </div>
-                  </div>
-                  <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid var(--border)", display: "flex", gap: "1rem" }}>
-                    <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "transparent", marginTop: "6px", flexShrink: 0 }}></div>
-                    <div>
-                      <p style={{ fontSize: "0.875rem", fontWeight: 600, margin: "0 0 0.25rem 0" }}>Penarikan Tunai</p>
-                      <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: 0 }}>Penarikan Rp 20.000 dilakukan melalui akses kartu Ibu.</p>
-                      <p style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "0.25rem" }}>Kemarin, 14:20</p>
-                    </div>
-                  </div>
-                  <div style={{ padding: "1rem 1.25rem", display: "flex", gap: "1rem" }}>
-                    <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "transparent", marginTop: "6px", flexShrink: 0 }}></div>
-                    <div>
-                      <p style={{ fontSize: "0.875rem", fontWeight: 600, margin: "0 0 0.25rem 0" }}>Kartu Baru Didaftarkan</p>
-                      <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: 0 }}>Kartu RFID (Kartu Ayah) berhasil didaftarkan.</p>
-                      <p style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "0.25rem" }}>1 Okt 2026</p>
-                    </div>
-                  </div>
+                  ) : (
+                    notifications.map(notif => (
+                      <div key={notif.id} style={{ padding: "1rem 1.25rem", borderBottom: "1px solid var(--border)", display: "flex", gap: "1rem", backgroundColor: notif.read ? "transparent" : "#f0f9ff" }}>
+                        <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: notif.read ? "transparent" : "#3b82f6", marginTop: "6px", flexShrink: 0 }}></div>
+                        <div>
+                          <p style={{ fontSize: "0.875rem", fontWeight: 600, margin: "0 0 0.25rem 0" }}>{notif.title}</p>
+                          <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: 0 }}>{notif.message}</p>
+                          <p style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "0.25rem" }}>{notif.time}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
                 <div style={{ padding: "0.75rem", borderTop: "1px solid var(--border)", textAlign: "center" }}>
                   <a href="#" style={{ fontSize: "0.875rem", color: "#3b82f6", textDecoration: "none", fontWeight: 500 }}>Lihat semua notifikasi</a>

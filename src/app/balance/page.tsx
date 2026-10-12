@@ -12,11 +12,22 @@ export default function BalancePage() {
   const [targetAmount, setTargetAmount] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [transactionToEdit, setTransactionToEdit] = useState<any>(null);
+  const [editAmount, setEditAmount] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
+  
   const [transactions, setTransactions] = useState<any[]>([]);
   const [balance, setBalance] = useState(0);
   const [expensesThisMonth, setExpensesThisMonth] = useState(0);
   const [currentSavingsTarget, setCurrentSavingsTarget] = useState(12000000);
   const [isLoading, setIsLoading] = useState(true);
+  const [aiAdvice, setAiAdvice] = useState("Menganalisa data tabunganmu...");
+  const [advisorMode, setAdvisorMode] = useState<'target' | 'expense'>('target');
 
   const loadData = async () => {
     setIsLoading(true);
@@ -51,12 +62,73 @@ export default function BalancePage() {
       
       setBalance(totalBal);
       setExpensesThisMonth(expensesMonth);
+
+      try {
+        const avgDaily = 20000;
+        const targetAmountNum = targetData ? Number(targetData.amount) : 12000000;
+        const remaining = targetAmountNum - totalBal;
+        let estimatedDate = "Beberapa bulan lagi";
+        if (avgDaily > 0 && remaining > 0) {
+          const daysNeeded = Math.ceil(remaining / avgDaily);
+          const tDate = new Date();
+          tDate.setDate(tDate.getDate() + daysNeeded);
+          const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+          estimatedDate = `${tDate.getDate()} ${months[tDate.getMonth()]} ${tDate.getFullYear()}`;
+        } else if (remaining <= 0) {
+          estimatedDate = "Sudah Tercapai!";
+        }
+        const fallbackText = `Berdasarkan pola menabungmu (rata-rata Rp ${avgDaily.toLocaleString('id-ID')}/hari), kamu diprediksi mencapai target pada ${estimatedDate}. 💡 Tips: Sisihkan uang jajan tiap hari agar target cepat tercapai.`;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+        
+        const res = await fetch('/api/advisor', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ balance: totalBal, target: targetAmountNum, avgDailySavings: avgDaily }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        const apiData = await res.json();
+        if (apiData.advice) {
+          setAiAdvice(apiData.advice);
+        } else {
+          setAiAdvice(fallbackText);
+        }
+      } catch (e) {
+        // Fallback calculation matches backend if fetch throws
+        const avgDaily = 20000;
+        const targetAmountNum = targetData ? Number(targetData.amount) : 12000000;
+        const remaining = targetAmountNum - totalBal;
+        let estimatedDate = "Beberapa bulan lagi";
+        if (avgDaily > 0 && remaining > 0) {
+          const daysNeeded = Math.ceil(remaining / avgDaily);
+          const tDate = new Date();
+          tDate.setDate(tDate.getDate() + daysNeeded);
+          const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+          estimatedDate = `${tDate.getDate()} ${months[tDate.getMonth()]} ${tDate.getFullYear()}`;
+        } else if (remaining <= 0) {
+          estimatedDate = "Sudah Tercapai!";
+        }
+        setAiAdvice(`Berdasarkan pola menabungmu (rata-rata Rp ${avgDaily.toLocaleString('id-ID')}/hari), kamu diprediksi mencapai target pada ${estimatedDate}. 💡 Tips: Sisihkan uang jajan tiap hari agar target cepat tercapai.`);
+      }
     }
     setIsLoading(false);
   };
 
   useEffect(() => {
     loadData();
+    
+    // Check if we navigated here specifically to set target
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.get('action') === 'set_target') {
+        setIsTargetModalOpen(true);
+        // Clean up URL so refresh doesn't reopen modal
+        window.history.replaceState({}, '', '/balance');
+      }
+    }
   }, []);
 
   const formatRp = (num: number) => {
@@ -100,6 +172,43 @@ export default function BalancePage() {
     setSuccessMessage(`Target tabungan baru diatur:\nRp ${newTarget.toLocaleString('id-ID')}`);
     setTargetAmount("");
     setIsTargetModalOpen(false);
+  };
+
+  const handleDeleteTransaction = async () => {
+    if (!transactionToDelete) return;
+    setIsDeleting(true);
+    const { error } = await supabase.from('transactions').delete().eq('id', transactionToDelete);
+    if (!error) {
+      setSuccessMessage("Transaksi berhasil dihapus.");
+      setIsDeleteModalOpen(false);
+      setTransactionToDelete(null);
+      loadData();
+    } else {
+      alert("Gagal menghapus transaksi.");
+    }
+    setIsDeleting(false);
+  };
+
+  const handleEditTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transactionToEdit || !editAmount) return;
+    setIsEditing(true);
+    const newAmount = Number(editAmount);
+    
+    const { error } = await supabase
+      .from('transactions')
+      .update({ amount: newAmount })
+      .eq('id', transactionToEdit.id);
+      
+    if (!error) {
+      setSuccessMessage("Nominal transaksi berhasil diubah.");
+      setIsEditModalOpen(false);
+      setTransactionToEdit(null);
+      loadData();
+    } else {
+      alert("Gagal mengubah transaksi.");
+    }
+    setIsEditing(false);
   };
 
   return (
@@ -182,19 +291,35 @@ export default function BalancePage() {
           <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
             <div style={{ backgroundColor: "#f8fafc", border: "1px solid #f1f5f9", borderRadius: "0.75rem", padding: "1rem", color: "#475569", fontSize: "0.85rem", lineHeight: 1.5 }}>
               <p style={{ margin: 0 }}>
-                Berdasarkan pola menabungmu (rata-rata <strong>Rp 20.000/hari</strong>), kamu diprediksi mencapai target beli Laptop pada <strong>15 November 2026</strong>. 
-              </p>
-              <p style={{ margin: "0.5rem 0 0 0", color: "#3b82f6", fontWeight: 500 }}>
-                💡 Tips: Kurangi jajan di luar untuk mempercepat target ini dalam 2 bulan.
+                {advisorMode === 'target' 
+                  ? aiAdvice 
+                  : `Pengeluaran bulan ini mencapai ${formatRp(expensesThisMonth)}. 💡 Tips: Tinjau kembali pembelian yang kurang penting agar target tabunganmu lebih cepat tercapai.`}
               </p>
             </div>
 
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button style={{ backgroundColor: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "0.35rem 0.75rem", borderRadius: "0.5rem", fontSize: "0.75rem", fontWeight: 500, cursor: "pointer", transition: "all 0.2s" }} onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#f8fafc"} onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}>
-                Beri Tips Lain
-              </button>
-              <button style={{ backgroundColor: "transparent", color: "#64748b", border: "1px solid #e2e8f0", padding: "0.35rem 0.75rem", borderRadius: "0.5rem", fontSize: "0.75rem", fontWeight: 500, cursor: "pointer", transition: "all 0.2s" }} onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#f8fafc"} onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}>
-                Analisis Pengeluaran
+            <div style={{ display: "flex" }}>
+              <button 
+                onClick={() => setAdvisorMode(prev => prev === 'target' ? 'expense' : 'target')}
+                style={{ 
+                  backgroundColor: "#eff6ff", 
+                  color: "#3b82f6", 
+                  border: "none", 
+                  padding: "0.5rem 1rem", 
+                  borderRadius: "9999px", 
+                  fontSize: "0.75rem", 
+                  fontWeight: 600, 
+                  cursor: "pointer", 
+                  transition: "all 0.2s",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.25rem",
+                  fontFamily: "inherit",
+                  letterSpacing: "0.025em"
+                }} 
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#dbeafe"} 
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = "#eff6ff"}
+              >
+                {advisorMode === 'target' ? 'Analisis Pengeluaran' : 'Analisis Keuangan'}
               </button>
             </div>
           </div>
@@ -268,12 +393,21 @@ export default function BalancePage() {
                         </td>
                         <td style={{ padding: "1rem", display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
                           <button 
+                            onClick={() => {
+                              setTransactionToEdit(tx);
+                              setEditAmount(tx.amount.toString());
+                              setIsEditModalOpen(true);
+                            }}
                             style={{ padding: "0.5rem", borderRadius: "0.5rem", border: "1px solid #e5e7eb", backgroundColor: "white", color: "#3b82f6", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                             title="Edit"
                           >
                             <IconEdit size={16} />
                           </button>
                           <button 
+                            onClick={() => {
+                              setTransactionToDelete(tx.id);
+                              setIsDeleteModalOpen(true);
+                            }}
                             style={{ padding: "0.5rem", borderRadius: "0.5rem", border: "1px solid #fee2e2", backgroundColor: "#fef2f2", color: "#ef4444", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                             title="Hapus"
                           >
@@ -313,7 +447,7 @@ export default function BalancePage() {
                   autoFocus
                 />
               </div>
-              <button type="submit" className="btn btn-primary" style={{ width: "100%", marginTop: "0.5rem" }}>
+              <button type="submit" className="btn btn-primary" style={{ width: "100%", marginTop: "0.5rem", fontFamily: "inherit", fontWeight: 600, letterSpacing: "0.025em" }}>
                 Proses Penarikan
               </button>
             </form>
@@ -344,9 +478,89 @@ export default function BalancePage() {
                   autoFocus
                 />
               </div>
-              <button type="submit" className="btn btn-primary" style={{ width: "100%", marginTop: "0.5rem" }}>
+              <button type="submit" className="btn btn-primary" style={{ width: "100%", marginTop: "0.5rem", fontFamily: "inherit", fontWeight: 600, letterSpacing: "0.025em" }}>
                 Simpan Target
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeleteModalOpen && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+          <div className="card" style={{ width: "100%", maxWidth: "400px", padding: "1.5rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+              <h3 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Hapus Transaksi?</h3>
+              <button onClick={() => setIsDeleteModalOpen(false)} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280" }}>
+                <IconX size={20} />
+              </button>
+            </div>
+            <p style={{ color: "#4b5563", marginBottom: "1.5rem" }}>Apakah Anda yakin ingin menghapus data transaksi ini? Data yang sudah dihapus tidak dapat dikembalikan.</p>
+            <div style={{ display: "flex", gap: "1rem" }}>
+              <button 
+                onClick={() => setIsDeleteModalOpen(false)} 
+                className="btn btn-outline" 
+                style={{ flex: 1, backgroundColor: "white", color: "#374151", border: "1px solid #d1d5db", fontFamily: "inherit", fontWeight: 600, letterSpacing: "0.025em" }}
+                disabled={isDeleting}
+              >
+                Batal
+              </button>
+              <button 
+                onClick={handleDeleteTransaction} 
+                className="btn btn-primary" 
+                style={{ flex: 1, backgroundColor: "#ef4444", border: "none", fontFamily: "inherit", fontWeight: 600, letterSpacing: "0.025em" }}
+                disabled={isDeleting}
+              >
+                {isDeleting ? "Menghapus..." : "Ya, Hapus"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Transaction Modal */}
+      {isEditModalOpen && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+          <div className="card" style={{ width: "100%", maxWidth: "400px", padding: "1.5rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+              <h3 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Edit Nominal Transaksi</h3>
+              <button onClick={() => setIsEditModalOpen(false)} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280" }}>
+                <IconX size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleEditTransaction} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <label style={{ fontSize: "0.875rem", fontWeight: 500, color: "#4b5563" }}>Nominal Baru (Rp)</label>
+                <input 
+                  type="number" 
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  placeholder="Contoh: 50000" 
+                  style={{ padding: "0.75rem", borderRadius: "0.5rem", border: "1px solid #d1d5db", outline: "none", width: "100%", fontSize: "1rem" }}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem" }}>
+                <button 
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)} 
+                  className="btn btn-outline" 
+                  style={{ flex: 1, backgroundColor: "white", color: "#374151", border: "1px solid #d1d5db", fontFamily: "inherit", fontWeight: 600, letterSpacing: "0.025em" }}
+                  disabled={isEditing}
+                >
+                  Batal
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  style={{ flex: 1, backgroundColor: "#3b82f6", border: "none", fontFamily: "inherit", fontWeight: 600, letterSpacing: "0.025em" }}
+                  disabled={isEditing}
+                >
+                  {isEditing ? "Menyimpan..." : "Simpan Perubahan"}
+                </button>
+              </div>
             </form>
           </div>
         </div>

@@ -85,18 +85,17 @@ export default function LoginPage() {
       }}>
         <div style={{ marginBottom: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <div style={{ 
-            background: 'white', 
-            padding: '1rem', 
+            background: 'transparent', padding: '1rem', 
             borderRadius: '1.25rem', 
             marginBottom: '1.5rem',
             boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.05)',
             border: '1px solid #f3f4f6'
           }}>
             <Image 
-              src="/SmartTabunganLogo.png" 
+              src="/LogoSavingLoginPage.png" 
               alt="Smart Tabungan Logo" 
-              width={60} 
-              height={60} 
+              width={80} 
+              height={80} 
               style={{ objectFit: "contain" }}
               priority
             />
@@ -218,14 +217,30 @@ export default function LoginPage() {
               color: 'white',
               fontSize: '1rem',
               fontWeight: 600,
+              fontFamily: 'inherit',
+              letterSpacing: '0.025em',
               cursor: isLoading ? 'not-allowed' : 'pointer',
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
               gap: '0.5rem',
-              transition: 'background-color 0.3s ease',
+              transition: 'all 0.2s ease',
               marginTop: '0.5rem',
               boxShadow: '0 4px 14px 0 rgba(59, 130, 246, 0.39)'
+            }}
+            onMouseOver={(e) => {
+              if (!isLoading) {
+                e.currentTarget.style.backgroundColor = '#2563eb';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 6px 20px rgba(59, 130, 246, 0.4)';
+              }
+            }}
+            onMouseOut={(e) => {
+              if (!isLoading) {
+                e.currentTarget.style.backgroundColor = '#3b82f6';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 4px 14px 0 rgba(59, 130, 246, 0.39)';
+              }
             }}
           >
             {isLoading ? (

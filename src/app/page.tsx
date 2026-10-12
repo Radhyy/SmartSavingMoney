@@ -22,13 +22,16 @@ export default function Dashboard() {
   const router = useRouter();
   const [isMainBalanceVisible, setIsMainBalanceVisible] = useState(true);
   const [isTotalVisible, setIsTotalVisible] = useState(true);
-  const [filterType, setFilterType] = useState("Bulanan");
+  const [filterType, setFilterType] = useState("Harian");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+  const [isTargetMenuOpen, setIsTargetMenuOpen] = useState(false);
   
   const [balance, setBalance] = useState(0);
   const [currentSavingsTarget, setCurrentSavingsTarget] = useState(12000000);
   const [isLoading, setIsLoading] = useState(true);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [chartData, setChartData] = useState<any[]>([]);
 
   useEffect(() => {
     async function fetchData() {
@@ -37,8 +40,9 @@ export default function Dashboard() {
       const { data: targetData } = await supabase.from('savings_target').select('amount').eq('id', 1).single();
       if (targetData) setCurrentSavingsTarget(Number(targetData.amount));
 
-      const { data, error } = await supabase.from('transactions').select('type, amount');
+      const { data, error } = await supabase.from('transactions').select('*');
       if (!error && data) {
+        setTransactions(data);
         let total = 0;
         data.forEach(txn => {
           if (txn.type === 'deposit') total += Number(txn.amount);
@@ -55,12 +59,94 @@ export default function Dashboard() {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
   };
 
+  useEffect(() => {
+    const now = new Date();
+    const periods: any[] = [];
+    
+    if (filterType === 'Harian') {
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(now.getDate() - i);
+        periods.push({
+          label: d.toLocaleDateString('id-ID', { weekday: 'short' }),
+          start: new Date(d.setHours(0,0,0,0)),
+          end: new Date(d.setHours(23,59,59,999)),
+          value: 0
+        });
+      }
+    } else if (filterType === 'Mingguan') {
+      for (let i = 4; i >= 0; i--) {
+        const start = new Date();
+        start.setDate(now.getDate() - (i * 7) - now.getDay());
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        periods.push({
+          label: `Mg ${5-i}`,
+          start: new Date(start.setHours(0,0,0,0)),
+          end: new Date(end.setHours(23,59,59,999)),
+          value: 0
+        });
+      }
+    } else if (filterType === 'Bulanan') {
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+        periods.push({
+          label: d.toLocaleDateString('id-ID', { month: 'short' }),
+          start: new Date(d.setHours(0,0,0,0)),
+          end: new Date(end.setHours(23,59,59,999)),
+          value: 0
+        });
+      }
+    } else if (filterType === 'Tahunan') {
+      for (let i = 4; i >= 0; i--) {
+        const d = new Date(now.getFullYear() - i, 0, 1);
+        const end = new Date(now.getFullYear() - i, 11, 31);
+        periods.push({
+          label: `${d.getFullYear()}`,
+          start: new Date(d.setHours(0,0,0,0)),
+          end: new Date(end.setHours(23,59,59,999)),
+          value: 0
+        });
+      }
+    }
+
+    transactions.forEach(tx => {
+      const txDate = new Date(tx.created_at);
+      const amt = Number(tx.amount);
+      for (let p of periods) {
+        if (txDate >= p.start && txDate <= p.end) {
+          if (tx.type === 'deposit') p.value += amt;
+          else if (tx.type === 'expense') p.value -= amt;
+          break;
+        }
+      }
+    });
+
+    const maxVal = Math.max(...periods.map(p => Math.abs(p.value)), 1);
+
+    const newChartData = periods.map(p => {
+      const height = Math.max((Math.abs(p.value) / maxVal) * 200, 10);
+      const opacity = p.value >= 0 ? 0.5 + (Math.abs(p.value) / maxVal) * 0.5 : 0.4;
+      
+      let valStr = "";
+      const absVal = Math.abs(p.value);
+      if (absVal >= 1000000) valStr = `Rp ${(p.value / 1000000).toFixed(1)}Jt`;
+      else if (absVal >= 1000) valStr = `Rp ${(p.value / 1000).toFixed(0)}Rb`;
+      else valStr = `Rp ${p.value}`;
+
+      return { ...p, height, opacity, valStr };
+    });
+
+    setChartData(newChartData);
+  }, [filterType, transactions]);
+
   return (
     <>
       {/* Left Column */}
       <div style={{ display: "flex", flexDirection: "column", gap: "2rem", minWidth: 0, width: "100%" }}>
         {/* Balance Card */}
-        <div className="card">
+        <div className="card" style={{ overflow: 'visible' }}>
           <div className="card-header">
             <div className="card-title">
               <IconWallet size={20} color="#3b82f6" />
@@ -152,9 +238,9 @@ export default function Dashboard() {
                 <IconDots size={18} />
               </button>
               {isActionMenuOpen && (
-                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '0.5rem', backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', border: '1px solid #e5e7eb', zIndex: 20, width: '120px' }}>
-                  <div onClick={() => router.push('/settings')} style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }} className="hover:bg-gray-50">
-                    <IconSettings size={14} /> Setting
+                <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', marginTop: '0.5rem', backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', border: '1px solid #e5e7eb', zIndex: 20, width: '150px' }}>
+                  <div onClick={() => router.push('/balance?action=set_target')} style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }} className="hover:bg-gray-50">
+                    <IconTarget size={14} /> Setting Target
                   </div>
                 </div>
               )}
@@ -163,15 +249,27 @@ export default function Dashboard() {
         </div>
 
         {/* Pencapaian Target Card */}
-        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', overflow: 'visible' }}>
           <div className="card-header" style={{ marginBottom: '2rem' }}>
             <div className="card-title">
               <IconSettings size={20} color="#3b82f6" />
               Pencapaian Target
             </div>
-            <button className="btn-icon" style={{ border: 'none', background: 'transparent' }}>
-              <IconDots size={18} color="#6b7280" />
-            </button>
+            <div style={{ position: "relative" }}>
+              <button className="btn-icon" style={{ border: 'none', background: 'transparent' }} onClick={() => setIsTargetMenuOpen(!isTargetMenuOpen)}>
+                <IconDots size={18} color="#6b7280" />
+              </button>
+              {isTargetMenuOpen && (
+                <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', marginTop: '0.5rem', backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', border: '1px solid #e5e7eb', zIndex: 20, width: '150px' }}>
+                  <div 
+                    onClick={() => router.push('/balance?action=set_target')} 
+                    style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }} 
+                  >
+                    <IconTarget size={14} /> Ubah Target
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingBottom: '1rem' }}>
@@ -254,31 +352,20 @@ export default function Dashboard() {
           </div>
 
           <div className="chart-container">
-            <div className="chart-bar-group">
-              <div className="chart-bar-value">Rp 12M</div>
-              <div className="chart-bar" style={{ height: "120px", opacity: 0.8 }}></div>
-              <div className="chart-bar-label">Minggu 1</div>
-            </div>
-            <div className="chart-bar-group">
-              <div className="chart-bar-value">Rp 8M</div>
-              <div className="chart-bar" style={{ height: "80px", opacity: 0.6 }}></div>
-              <div className="chart-bar-label">Minggu 2</div>
-            </div>
-            <div className="chart-bar-group">
-              <div className="chart-bar-value">Rp 15M</div>
-              <div className="chart-bar" style={{ height: "150px", opacity: 0.9 }}></div>
-              <div className="chart-bar-label">Minggu 3</div>
-            </div>
-            <div className="chart-bar-group">
-              <div className="chart-bar-value">Rp 9M</div>
-              <div className="chart-bar" style={{ height: "90px", opacity: 0.7 }}></div>
-              <div className="chart-bar-label">Minggu 4</div>
-            </div>
-            <div className="chart-bar-group">
-              <div className="chart-bar-value">Rp 20M</div>
-              <div className="chart-bar" style={{ height: "200px", opacity: 1 }}></div>
-              <div className="chart-bar-label">Minggu 5</div>
-            </div>
+            {chartData.map((data, index) => (
+              <div key={index} className="chart-bar-group" style={{ width: `${100 / chartData.length}%` }}>
+                <div className="chart-bar-value" style={{ color: data.value < 0 ? '#ef4444' : 'inherit' }}>{data.valStr}</div>
+                <div 
+                  className="chart-bar" 
+                  style={{ 
+                    height: `${data.height}px`, 
+                    opacity: data.opacity,
+                    background: data.value < 0 ? 'linear-gradient(180deg, #f87171 0%, #dc2626 100%)' : 'linear-gradient(180deg, #60a5fa 0%, #2563eb 100%)'
+                  }}
+                ></div>
+                <div className="chart-bar-label">{data.label}</div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

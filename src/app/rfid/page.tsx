@@ -1,13 +1,19 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { IconId, IconLock, IconLockOpen, IconPlus, IconHistory, IconAlertTriangle, IconRefresh } from "@tabler/icons-react";
+import { IconId, IconLock, IconLockOpen, IconPlus, IconHistory, IconAlertTriangle, IconRefresh, IconX, IconTrash } from "@tabler/icons-react";
 import { supabase } from "@/lib/supabase";
 
 export default function RfidPage() {
   const [rfidLogs, setRfidLogs] = useState<any[]>([]);
   const [suspiciousCount, setSuspiciousCount] = useState(0);
   const [registeredCardsCount, setRegisteredCardsCount] = useState(0);
+  const [registeredCards, setRegisteredCards] = useState<any[]>([]);
+  const [isCardsModalOpen, setIsCardsModalOpen] = useState(false);
+  const [newCardUid, setNewCardUid] = useState("");
+  const [newCardOwner, setNewCardOwner] = useState("");
+  const [newCardPhone, setNewCardPhone] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadData = async () => {
@@ -34,14 +40,48 @@ export default function RfidPage() {
       
     if (!suspError) setSuspiciousCount(suspCount || 0);
 
-    // Fetch registered cards count
-    const { count: cardsCount, error: cardsError } = await supabase
+    // Fetch registered cards
+    const { data: cardsData, error: cardsError } = await supabase
       .from('rfid_cards')
-      .select('*', { count: 'exact', head: true });
+      .select('*')
+      .order('created_at', { ascending: false });
       
-    if (!cardsError) setRegisteredCardsCount(cardsCount || 0);
+    if (!cardsError && cardsData) {
+      setRegisteredCards(cardsData);
+      setRegisteredCardsCount(cardsData.length);
+    }
 
     setIsLoading(false);
+  };
+
+  const handleAddCard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCardUid) return;
+    setIsSubmitting(true);
+    const { error } = await supabase.from('rfid_cards').insert([{ 
+      uid: newCardUid, 
+      owner_name: newCardOwner,
+      phone_number: newCardPhone
+    }]);
+    if (!error) {
+      setNewCardUid("");
+      setNewCardOwner("");
+      setNewCardPhone("");
+      loadData();
+    } else {
+      alert("Gagal menambahkan kartu. Mungkin UID sudah terdaftar.");
+    }
+    setIsSubmitting(false);
+  };
+
+  const handleDeleteCard = async (id: number) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus kartu ini?")) return;
+    const { error } = await supabase.from('rfid_cards').delete().eq('id', id);
+    if (!error) {
+      loadData();
+    } else {
+      alert("Gagal menghapus kartu.");
+    }
   };
 
   useEffect(() => {
@@ -100,8 +140,9 @@ export default function RfidPage() {
                 Kartu RFID Terdaftar
               </div>
               <button 
+                onClick={() => setIsCardsModalOpen(true)}
                 className="btn btn-outline" 
-                style={{ display: "flex", alignItems: "center", gap: "0.3rem", padding: "0.35rem 0.85rem", fontSize: "0.75rem", fontWeight: 600, borderRadius: "9999px", backgroundColor: "#f3f4f6", border: "none", color: "#374151" }}
+                style={{ display: "flex", alignItems: "center", gap: "0.3rem", padding: "0.35rem 0.85rem", fontSize: "0.75rem", fontWeight: 600, borderRadius: "9999px", backgroundColor: "#f3f4f6", border: "none", color: "#374151", cursor: "pointer" }}
               >
                 <IconPlus size={14} /> Tambah
               </button>
@@ -188,6 +229,108 @@ export default function RfidPage() {
           </table>
         </div>
       </div>
+
+      {/* Cards Modal */}
+      {isCardsModalOpen && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+          <div className="card" style={{ width: "100%", maxWidth: "500px", padding: "1.5rem", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem", flexShrink: 0 }}>
+              <h3 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Kelola Kartu RFID</h3>
+              <button onClick={() => setIsCardsModalOpen(false)} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280" }}>
+                <IconX size={20} />
+              </button>
+            </div>
+            
+            <div style={{ flex: 1, overflowY: "auto", marginBottom: "1.5rem", minHeight: "150px" }}>
+              <h4 style={{ fontSize: "0.875rem", fontWeight: 600, marginBottom: "0.75rem", color: "#4b5563" }}>Kartu Terdaftar</h4>
+              {registeredCards.length === 0 ? (
+                <p style={{ fontSize: "0.875rem", color: "#6b7280", textAlign: "center", padding: "1rem 0", backgroundColor: "#f9fafb", borderRadius: "0.5rem" }}>Belum ada kartu terdaftar.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {registeredCards.map(card => (
+                    <div key={card.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.75rem", border: "1px solid #e5e7eb", borderRadius: "0.5rem" }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: "0.875rem", color: "#111827" }}>{card.owner_name || 'Tanpa Nama'}</div>
+                        <div style={{ fontSize: "0.75rem", color: "#6b7280", fontFamily: "monospace" }}>UID: {card.uid}</div>
+                        {card.phone_number && <div style={{ fontSize: "0.75rem", color: "#3b82f6", marginTop: "0.25rem" }}>WA: {card.phone_number}</div>}
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteCard(card.id)}
+                        style={{ padding: "0.4rem", borderRadius: "0.5rem", border: "1px solid #fee2e2", backgroundColor: "#fef2f2", color: "#ef4444", cursor: "pointer", display: "flex" }}
+                        title="Hapus"
+                      >
+                        <IconTrash size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: "1.5rem", flexShrink: 0 }}>
+              <h4 style={{ fontSize: "0.875rem", fontWeight: 600, marginBottom: "0.75rem", color: "#4b5563" }}>Tambah Kartu Baru</h4>
+              <form onSubmit={handleAddCard} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  <input 
+                    type="text" 
+                    value={newCardUid}
+                    onChange={(e) => setNewCardUid(e.target.value)}
+                    placeholder="UID Kartu (contoh: BA8C6A06)" 
+                    style={{ padding: "0.75rem", borderRadius: "0.5rem", border: "1px solid #d1d5db", outline: "none", width: "100%", fontSize: "0.875rem", fontFamily: "monospace" }}
+                    required
+                  />
+                  <input 
+                    type="text" 
+                    value={newCardOwner}
+                    onChange={(e) => setNewCardOwner(e.target.value)}
+                    placeholder="Nama Pemilik (Opsional)" 
+                    style={{ padding: "0.75rem", borderRadius: "0.5rem", border: "1px solid #d1d5db", outline: "none", width: "100%", fontSize: "0.875rem" }}
+                  />
+                  <input 
+                    type="text" 
+                    value={newCardPhone}
+                    onChange={(e) => setNewCardPhone(e.target.value)}
+                    placeholder="Nomor WA (contoh: 62812xxx)" 
+                    style={{ padding: "0.75rem", borderRadius: "0.5rem", border: "1px solid #d1d5db", outline: "none", width: "100%", fontSize: "0.875rem" }}
+                  />
+                </div>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  style={{ 
+                    width: "100%", 
+                    display: "flex", 
+                    alignItems: "center", 
+                    justifyContent: "center", 
+                    gap: "0.5rem",
+                    fontWeight: 600,
+                    fontSize: "0.95rem",
+                    padding: "0.75rem",
+                    borderRadius: "0.75rem",
+                    fontFamily: "inherit",
+                    letterSpacing: "0.025em",
+                    border: "none",
+                    boxShadow: "0 4px 14px 0 rgba(59, 130, 246, 0.39)",
+                    transition: "all 0.3s ease"
+                  }} 
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="spinner" style={{ width: "18px", height: "18px", border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                      Menambahkan...
+                    </>
+                  ) : (
+                    <>
+                      <IconPlus size={18} /> Tambah Kartu
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
