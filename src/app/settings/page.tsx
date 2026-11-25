@@ -117,8 +117,11 @@ export default function Settings() {
       const data = await res.json();
       if (data.status) {
         setWaStatus(data.status);
-        setWaQrCode(data.qrCode);
+        if (data.qrCode) setWaQrCode(data.qrCode);
         setWaUser(data.user);
+      }
+      if (data.status === 'disconnected' && data.lastError) {
+        setWaMessage({ type: 'error', text: `Gagal memuat barcode: ${data.lastError}` });
       }
     } catch (err: any) {
       setWaMessage({ type: 'error', text: 'Gagal memulai koneksi WhatsApp.' });

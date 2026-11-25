@@ -21,16 +21,44 @@ export interface WAState {
   user: { id?: string; name?: string } | null;
   targetPhone: string;
   isStarting: boolean;
+  lastError: string | null;
 }
 
-// Di Netlify / AWS Lambda, hanya folder /tmp (os.tmpdir()) yang memiliki izin tulis (writable)
-const BASE_DIR = process.env.NETLIFY ? os.tmpdir() : process.cwd();
+function getWritableBaseDir(): string {
+  // Selalu gunakan os.tmpdir() di lingkungan serverless / production Netlify / AWS Lambda
+  if (
+    process.env.NETLIFY ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT ||
+    process.env.VERCEL ||
+    process.env.NODE_ENV === 'production'
+  ) {
+    return os.tmpdir();
+  }
+  try {
+    const testPath = path.join(process.cwd(), '.write_test_' + Date.now());
+    fs.writeFileSync(testPath, '1');
+    fs.unlinkSync(testPath);
+    return process.cwd();
+  } catch {
+    return os.tmpdir();
+  }
+}
+
+const BASE_DIR = getWritableBaseDir();
 const AUTH_DIR = path.join(BASE_DIR, 'wa-auth');
 const CONFIG_FILE = path.join(BASE_DIR, 'wa-config.json');
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+let supabase: any = null;
+if (supabaseUrl && supabaseAnonKey) {
+  try {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+  } catch (err) {
+    console.error('Error creating Supabase client in WA:', err);
+  }
+}
 
 // Simpan state di globalThis agar tidak di-reset saat HMR di development
 const globalRef = globalThis as unknown as { __wa_instance?: WAState };
@@ -70,7 +98,7 @@ export async function saveWAConfig(config: Partial<WAConfig>): Promise<WAConfig>
   }
 
   // Simpan juga ke Supabase rfid_cards agar tersimpan di cloud & tidak hilang di Netlify
-  if (updated.targetPhone && supabaseUrl) {
+  if (updated.targetPhone && supabase) {
     try {
       const { data: cards } = await supabase.from('rfid_cards').select('id').limit(1);
       if (cards && cards.length > 0) {
@@ -97,6 +125,7 @@ function getGlobalState(): WAState {
       user: null,
       targetPhone: config.targetPhone,
       isStarting: false,
+      lastError: null,
     };
   }
   return globalRef.__wa_instance;
@@ -109,13 +138,9 @@ export async function initWhatsApp(forceRestart: boolean = false): Promise<WASta
     return state;
   }
 
-  if (state.isStarting && !forceRestart && state.qrCode) {
-    return state;
-  }
-
   state.isStarting = true;
   state.status = 'connecting';
-  state.qrCode = null;
+  state.lastError = null;
 
   return new Promise(async (resolve) => {
     let hasResolved = false;
@@ -127,9 +152,15 @@ export async function initWhatsApp(forceRestart: boolean = false): Promise<WASta
       }
     };
 
-    // Timeout maksimal 12 detik agar Netlify Function tidak timeout
+    // Timeout maksimal 12 detik agar tidak melebihi timeout Netlify function
     const timeout = setTimeout(() => {
-      safeResolve();
+      if (!hasResolved) {
+        if (!state.qrCode && state.status !== 'connected') {
+          state.status = 'disconnected';
+          state.lastError = 'Waktu inisialisasi habis (Timeout koneksi ke server WhatsApp)';
+        }
+        safeResolve();
+      }
     }, 12000);
 
     try {
@@ -172,43 +203,55 @@ export async function initWhatsApp(forceRestart: boolean = false): Promise<WASta
             const qrUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 8 });
             state.qrCode = qrUrl;
             state.status = 'qr';
+            state.lastError = null;
             clearTimeout(timeout);
             safeResolve();
-          } catch (qrErr) {
+          } catch (qrErr: any) {
             console.error('Error creating QR data URL:', qrErr);
+            state.lastError = qrErr?.message || 'Gagal generate barcode QR';
           }
         }
 
         if (connection === 'close') {
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+          const errorMsg = (lastDisconnect?.error as any)?.message || 'Koneksi ditutup';
+          state.lastError = `Terputus (${statusCode || 'unknown'}): ${errorMsg}`;
+
           const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
           state.sock = null;
-          state.qrCode = null;
           state.user = null;
 
           if (isLoggedOut) {
             state.status = 'disconnected';
+            state.qrCode = null;
             try {
-              fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-            } catch (e) {
-              console.error('Error removing auth dir:', e);
-            }
+              if (fs.existsSync(AUTH_DIR)) {
+                fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+              }
+            } catch (e) {}
           } else {
-            state.status = 'disconnected';
+            // Jika belum dapat QR
+            if (!state.qrCode) {
+              state.status = 'disconnected';
+            }
           }
+          clearTimeout(timeout);
+          safeResolve();
         } else if (connection === 'open') {
           state.status = 'connected';
           state.qrCode = null;
           state.user = sock.user || null;
+          state.lastError = null;
           clearTimeout(timeout);
           safeResolve();
         }
       });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error initializing WhatsApp socket:', error);
       state.status = 'disconnected';
+      state.lastError = error?.message || String(error);
       clearTimeout(timeout);
       safeResolve();
     }
@@ -230,6 +273,7 @@ export async function disconnectWhatsApp(): Promise<void> {
   state.status = 'disconnected';
   state.qrCode = null;
   state.user = null;
+  state.lastError = null;
 
   try {
     if (fs.existsSync(AUTH_DIR)) {
@@ -274,13 +318,14 @@ export async function getWhatsAppStatus(): Promise<{
   user: { id?: string; name?: string } | null;
   targetPhone: string;
   failThreshold: number;
+  lastError: string | null;
 }> {
   const state = getGlobalState();
   const config = getWAConfig();
   
   // Jika config lokal kosong, coba ambil dari nomor HP admin di Supabase
   let phone = config.targetPhone;
-  if (!phone && supabaseUrl) {
+  if (!phone && supabase) {
     try {
       const { data: adminCards } = await supabase
         .from('rfid_cards')
@@ -299,5 +344,6 @@ export async function getWhatsAppStatus(): Promise<{
     user: state.user,
     targetPhone: phone,
     failThreshold: config.failThreshold,
+    lastError: state.lastError,
   };
 }
