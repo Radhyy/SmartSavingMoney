@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { sendWhatsAppMessage, getWAConfig } from '@/lib/whatsapp';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Ganti atau set melalui .env.local
-const WA_SESSION_ID = process.env.WA_SESSION_ID || "";
 
 export async function POST(req: Request) {
   try {
@@ -35,7 +33,7 @@ export async function POST(req: Request) {
     }
 
     // ==========================================
-    // LOGIKA AKTIVITAS MENCURIGAKAN (UNKNOWN)
+    // LOGIKA AKTIVITAS MENCURIGAKAN (GAGAL > 4X)
     // ==========================================
     
     // Cek ada berapa tap 'unknown' dalam 5 menit terakhir
@@ -49,53 +47,70 @@ export async function POST(req: Request) {
       .gte('created_at', fiveMinutesAgo.toISOString());
 
     const totalUnknown = unknownCount || 0;
+    const waConfig = getWAConfig();
+    const threshold = waConfig.failThreshold || 4;
 
-    // Jika mencapai kelipatan 5 (5, 10, 15, dst)
-    if (totalUnknown > 0 && totalUnknown % 5 === 0) {
-      
-      // Ambil semua nomor HP admin dari database
-      const { data: adminCards } = await supabase
-        .from('rfid_cards')
-        .select('phone_number')
-        .not('phone_number', 'is', null);
+    // Trigger jika percobaan gagal melebihi batas (> 4x)
+    if (totalUnknown > threshold) {
+      // Cek apakah sudah pernah kirim alert dalam 2 menit terakhir agar tidak spam berkali-kali
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      const { data: recentAlerts } = await supabase
+        .from('suspicious_activities')
+        .select('id')
+        .gte('created_at', twoMinutesAgo)
+        .limit(1);
 
-      let sentTo = 0;
-      
-      if (adminCards && adminCards.length > 0) {
-        // Kirim pesan WA ke setiap nomor
-        for (const admin of adminCards) {
-          if (admin.phone_number) {
-            try {
-              // Pastikan format nomor diawali 62 sesuai aturan API WaveBot
-              let formattedPhone = admin.phone_number.replace(/\D/g, '');
-              if (formattedPhone.startsWith('0')) {
-                formattedPhone = '62' + formattedPhone.substring(1);
-              }
+      const alreadyAlertedRecently = recentAlerts && recentAlerts.length > 0;
 
-              await fetch("http://localhost:3001/api/wa/send", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  sessionId: WA_SESSION_ID,
-                  number: formattedPhone,
-                  message: `🚨 *PERINGATAN KEAMANAN!*\n\nAda aktivitas mencurigakan di Smart Tabungan Anda.\nTerdapat ${totalUnknown} kali percobaan tap menggunakan kartu yang tidak dikenal dalam 5 menit terakhir!\n\nMohon segera periksa tabungan Anda.`
-                })
-              });
-              sentTo++;
-            } catch (e) {
-              console.error("Gagal tembak API WA", e);
+      // Kirim alert jika belum ada alert baru dalam 2 menit terakhir, atau saat pas mencapai kelipatan 5
+      if (!alreadyAlertedRecently || totalUnknown % 5 === 0) {
+        const phoneList = new Set<string>();
+
+        // 1. Prioritaskan nomor dari pengaturan WhatsApp
+        if (waConfig.targetPhone && waConfig.targetPhone.trim() !== '') {
+          phoneList.add(waConfig.targetPhone.trim());
+        }
+
+        // 2. Ambil juga nomor telepon admin dari tabel rfid_cards (jika ada)
+        const { data: adminCards } = await supabase
+          .from('rfid_cards')
+          .select('phone_number')
+          .not('phone_number', 'is', null);
+
+        if (adminCards && adminCards.length > 0) {
+          adminCards.forEach((admin) => {
+            if (admin.phone_number) phoneList.add(admin.phone_number.trim());
+          });
+        }
+
+        const alertMessage = 
+          `🚨 *PERINGATAN KEAMANAN SMART TABUNGAN!*\n\n` +
+          `Terdeteksi aktivitas mencurigakan!\n` +
+          `Terdapat *${totalUnknown} kali* percobaan tap kartu RFID yang gagal (kartu tidak dikenal) dalam 5 menit terakhir!\n\n` +
+          `• UID Kartu Terakhir: *${uid}*\n` +
+          `• Waktu Kejadian: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}\n\n` +
+          `⚠️ *Mohon segera periksa celengan pintar Anda!*`;
+
+        let sentCount = 0;
+        for (const phone of phoneList) {
+          try {
+            const sendRes = await sendWhatsAppMessage(phone, alertMessage);
+            if (sendRes.success) {
+              sentCount++;
             }
+          } catch (e) {
+            console.error(`Gagal kirim WA ke ${phone}:`, e);
           }
         }
-      }
 
-      // Catat ke database bahwa kita sudah mendeteksi & mengingatkan
-      await supabase.from('suspicious_activities').insert([{
-        card_uid: uid,
-        type: 'UNKNOWN_CARD_SPAM',
-        attempts: totalUnknown,
-        detail: `Terkirim ke ${sentTo} nomor WA`
-      }]);
+        // Catat ke database tabel suspicious_activities
+        await supabase.from('suspicious_activities').insert([{
+          card_uid: uid,
+          type: 'UNKNOWN_CARD_SPAM',
+          attempts: totalUnknown,
+          detail: `Terkirim ke ${sentCount} nomor WhatsApp via Baileys`
+        }]);
+      }
     }
 
     // Kembalikan status ditolak ke ESP32

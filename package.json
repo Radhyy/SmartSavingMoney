@@ -14,8 +14,11 @@
     "@lottiefiles/dotlottie-react": "^0.19.16",
     "@supabase/supabase-js": "^2.117.2",
     "@tabler/icons-react": "^3.48.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "lucide-react": "^1.52.0",
     "next": "16.3.8",
+    "pino": "^10.4.0",
+    "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "recharts": "^3.10.1"
@@ -23,6 +26,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
