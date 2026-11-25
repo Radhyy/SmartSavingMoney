@@ -6,6 +6,8 @@ import QRCode from 'qrcode';
 import pino from 'pino';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import { createClient } from '@supabase/supabase-js';
 
 export interface WAConfig {
   targetPhone: string;
@@ -21,8 +23,14 @@ export interface WAState {
   isStarting: boolean;
 }
 
-const AUTH_DIR = path.join(process.cwd(), 'wa-auth');
-const CONFIG_FILE = path.join(process.cwd(), 'wa-config.json');
+// Di Netlify / AWS Lambda, hanya folder /tmp (os.tmpdir()) yang memiliki izin tulis (writable)
+const BASE_DIR = process.env.NETLIFY ? os.tmpdir() : process.cwd();
+const AUTH_DIR = path.join(BASE_DIR, 'wa-auth');
+const CONFIG_FILE = path.join(BASE_DIR, 'wa-config.json');
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Simpan state di globalThis agar tidak di-reset saat HMR di development
 const globalRef = globalThis as unknown as { __wa_instance?: WAState };
@@ -42,20 +50,40 @@ export function getWAConfig(): WAConfig {
   return { targetPhone: '', failThreshold: 4 };
 }
 
-export function saveWAConfig(config: Partial<WAConfig>): WAConfig {
+export async function saveWAConfig(config: Partial<WAConfig>): Promise<WAConfig> {
   const current = getWAConfig();
   const updated: WAConfig = {
     targetPhone: config.targetPhone !== undefined ? config.targetPhone : current.targetPhone,
     failThreshold: config.failThreshold !== undefined ? config.failThreshold : current.failThreshold,
   };
+
   try {
+    if (!fs.existsSync(BASE_DIR)) {
+      fs.mkdirSync(BASE_DIR, { recursive: true });
+    }
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(updated, null, 2), 'utf-8');
     if (globalRef.__wa_instance) {
       globalRef.__wa_instance.targetPhone = updated.targetPhone;
     }
   } catch (e) {
-    console.error('Error saving WA config:', e);
+    console.error('Error saving local WA config:', e);
   }
+
+  // Simpan juga ke Supabase rfid_cards agar tersimpan di cloud & tidak hilang di Netlify
+  if (updated.targetPhone && supabaseUrl) {
+    try {
+      const { data: cards } = await supabase.from('rfid_cards').select('id').limit(1);
+      if (cards && cards.length > 0) {
+        await supabase
+          .from('rfid_cards')
+          .update({ phone_number: updated.targetPhone })
+          .eq('id', cards[0].id);
+      }
+    } catch (dbErr) {
+      console.error('Error syncing phone to Supabase:', dbErr);
+    }
+  }
+
   return updated;
 }
 
@@ -81,7 +109,7 @@ export async function initWhatsApp(forceRestart: boolean = false): Promise<WASta
     return state;
   }
 
-  if (state.isStarting && !forceRestart) {
+  if (state.isStarting && !forceRestart && state.qrCode) {
     return state;
   }
 
@@ -89,86 +117,102 @@ export async function initWhatsApp(forceRestart: boolean = false): Promise<WASta
   state.status = 'connecting';
   state.qrCode = null;
 
-  try {
-    if (!fs.existsSync(AUTH_DIR)) {
-      fs.mkdirSync(AUTH_DIR, { recursive: true });
-    }
-
-    const { state: authState, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-
-    // Tutup socket lama jika ada
-    if (state.sock) {
-      try {
-        state.sock.ev.removeAllListeners('connection.update');
-        state.sock.ev.removeAllListeners('creds.update');
-        state.sock.end(undefined);
-      } catch (err) {
-        // Abaikan error saat cleanup socket lama
+  return new Promise(async (resolve) => {
+    let hasResolved = false;
+    const safeResolve = () => {
+      if (!hasResolved) {
+        hasResolved = true;
+        state.isStarting = false;
+        resolve(state);
       }
-      state.sock = null;
-    }
+    };
 
-    const sock = makeWASocket({
-      auth: authState,
-      logger: pino({ level: 'silent' }),
-      printQRInTerminal: false,
-      browser: ['Smart Tabungan', 'Chrome', '1.0.0'],
-    });
+    // Timeout maksimal 12 detik agar Netlify Function tidak timeout
+    const timeout = setTimeout(() => {
+      safeResolve();
+    }, 12000);
 
-    state.sock = sock;
+    try {
+      if (!fs.existsSync(AUTH_DIR)) {
+        fs.mkdirSync(AUTH_DIR, { recursive: true });
+      }
 
-    sock.ev.on('creds.update', saveCreds);
+      const { state: authState, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-    sock.ev.on('connection.update', async (update) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      if (qr) {
+      // Tutup socket lama jika ada
+      if (state.sock) {
         try {
-          const qrUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 8 });
-          state.qrCode = qrUrl;
-          state.status = 'qr';
-        } catch (qrErr) {
-          console.error('Error creating QR data URL:', qrErr);
+          state.sock.ev.removeAllListeners('connection.update');
+          state.sock.ev.removeAllListeners('creds.update');
+          state.sock.end(undefined);
+        } catch (err) {
+          // Abaikan error saat cleanup socket lama
         }
-      }
-
-      if (connection === 'close') {
-        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-
         state.sock = null;
-        state.qrCode = null;
-        state.user = null;
-
-        if (isLoggedOut) {
-          state.status = 'disconnected';
-          try {
-            fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-          } catch (e) {
-            console.error('Error removing auth dir:', e);
-          }
-        } else {
-          // Reconnect otomatis jika koneksi terputus bukan karena logout
-          state.status = 'disconnected';
-          setTimeout(() => {
-            initWhatsApp(true).catch(console.error);
-          }, 3000);
-        }
-      } else if (connection === 'open') {
-        state.status = 'connected';
-        state.qrCode = null;
-        state.user = sock.user || null;
       }
-    });
 
-  } catch (error) {
-    console.error('Error initializing WhatsApp socket:', error);
-    state.status = 'disconnected';
-  } finally {
-    state.isStarting = false;
-  }
+      const sock = makeWASocket({
+        auth: authState,
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: false,
+        browser: ['Smart Tabungan', 'Chrome', '1.0.0'],
+        connectTimeoutMs: 15000,
+        keepAliveIntervalMs: 10000,
+      });
 
-  return state;
+      state.sock = sock;
+
+      sock.ev.on('creds.update', saveCreds);
+
+      sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+          try {
+            const qrUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 8 });
+            state.qrCode = qrUrl;
+            state.status = 'qr';
+            clearTimeout(timeout);
+            safeResolve();
+          } catch (qrErr) {
+            console.error('Error creating QR data URL:', qrErr);
+          }
+        }
+
+        if (connection === 'close') {
+          const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+          const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+
+          state.sock = null;
+          state.qrCode = null;
+          state.user = null;
+
+          if (isLoggedOut) {
+            state.status = 'disconnected';
+            try {
+              fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+            } catch (e) {
+              console.error('Error removing auth dir:', e);
+            }
+          } else {
+            state.status = 'disconnected';
+          }
+        } else if (connection === 'open') {
+          state.status = 'connected';
+          state.qrCode = null;
+          state.user = sock.user || null;
+          clearTimeout(timeout);
+          safeResolve();
+        }
+      });
+
+    } catch (error) {
+      console.error('Error initializing WhatsApp socket:', error);
+      state.status = 'disconnected';
+      clearTimeout(timeout);
+      safeResolve();
+    }
+  });
 }
 
 export async function disconnectWhatsApp(): Promise<void> {
@@ -188,7 +232,9 @@ export async function disconnectWhatsApp(): Promise<void> {
   state.user = null;
 
   try {
-    fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+    if (fs.existsSync(AUTH_DIR)) {
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+    }
   } catch (e) {
     console.error('Error removing auth dir on disconnect:', e);
   }
@@ -222,21 +268,36 @@ export async function sendWhatsAppMessage(targetNumber: string, message: string)
   }
 }
 
-export function getWhatsAppStatus(): {
+export async function getWhatsAppStatus(): Promise<{
   status: 'disconnected' | 'connecting' | 'qr' | 'connected';
   qrCode: string | null;
   user: { id?: string; name?: string } | null;
   targetPhone: string;
   failThreshold: number;
-} {
+}> {
   const state = getGlobalState();
   const config = getWAConfig();
+  
+  // Jika config lokal kosong, coba ambil dari nomor HP admin di Supabase
+  let phone = config.targetPhone;
+  if (!phone && supabaseUrl) {
+    try {
+      const { data: adminCards } = await supabase
+        .from('rfid_cards')
+        .select('phone_number')
+        .not('phone_number', 'is', null)
+        .limit(1);
+      if (adminCards && adminCards.length > 0 && adminCards[0].phone_number) {
+        phone = adminCards[0].phone_number;
+      }
+    } catch {}
+  }
+
   return {
     status: state.status,
     qrCode: state.qrCode,
     user: state.user,
-    targetPhone: config.targetPhone,
+    targetPhone: phone,
     failThreshold: config.failThreshold,
   };
 }
-

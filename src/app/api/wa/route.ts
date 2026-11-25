@@ -7,14 +7,12 @@ import {
   sendWhatsAppMessage 
 } from '@/lib/whatsapp';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
-    const status = getWhatsAppStatus();
-    // Jika belum terhubung dan belum ada QR dan belum connecting, inisialisasi awal
-    if (status.status === 'disconnected') {
-      initWhatsApp().catch(console.error);
-    }
-    return NextResponse.json(getWhatsAppStatus());
+    const status = await getWhatsAppStatus();
+    return NextResponse.json(status);
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -27,17 +25,19 @@ export async function POST(req: Request) {
 
     if (action === 'connect') {
       await initWhatsApp(true);
-      return NextResponse.json({ success: true, ...getWhatsAppStatus() });
+      const status = await getWhatsAppStatus();
+      return NextResponse.json({ success: true, ...status });
     }
 
     if (action === 'disconnect') {
       await disconnectWhatsApp();
-      return NextResponse.json({ success: true, ...getWhatsAppStatus() });
+      const status = await getWhatsAppStatus();
+      return NextResponse.json({ success: true, ...status });
     }
 
     if (action === 'save_settings') {
       const { targetPhone, failThreshold } = body;
-      const updated = saveWAConfig({
+      const updated = await saveWAConfig({
         targetPhone: targetPhone !== undefined ? targetPhone : undefined,
         failThreshold: failThreshold !== undefined ? Number(failThreshold) : undefined,
       });
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     }
 
     if (action === 'test_send') {
-      const current = getWhatsAppStatus();
+      const current = await getWhatsAppStatus();
       const phone = body.targetPhone || current.targetPhone;
       if (!phone) {
         return NextResponse.json({ success: false, error: 'Nomor WhatsApp belum diisi' }, { status: 400 });
@@ -68,4 +68,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-
