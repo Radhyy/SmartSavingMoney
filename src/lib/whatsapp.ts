@@ -52,12 +52,14 @@ export async function saveWAConfig(config: Partial<WAConfig>): Promise<WAConfig>
   const targetPhone = config.targetPhone || '';
   if (targetPhone && supabase) {
     try {
-      const { data: cards } = await supabase.from('rfid_cards').select('id').limit(1);
+      const { data: cards } = await supabase.from('rfid_cards').select('id');
       if (cards && cards.length > 0) {
-        await supabase
-          .from('rfid_cards')
-          .update({ phone_number: targetPhone })
-          .eq('id', cards[0].id);
+        for (const card of cards) {
+          await supabase
+            .from('rfid_cards')
+            .update({ phone_number: targetPhone })
+            .eq('id', card.id);
+        }
       }
     } catch (dbErr) {
       console.error('Error syncing phone to Supabase:', dbErr);

@@ -86,6 +86,30 @@ export default function RfidPage() {
 
   useEffect(() => {
     loadData();
+
+    // Supabase Realtime Listener untuk rfid_events, suspicious_activities, dan rfid_cards
+    const channel = supabase
+      .channel('realtime_rfid_page')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rfid_events' }, () => {
+        loadData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'suspicious_activities' }, () => {
+        loadData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rfid_cards' }, () => {
+        loadData();
+      })
+      .subscribe();
+
+    // Polling setiap 5 detik agar data tetap segar otomatis jika websocket tab terhambat
+    const interval = setInterval(() => {
+      loadData();
+    }, 5000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
   }, []);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2rem", width: "100%", gridColumn: "1 / -1", minWidth: 0 }}>

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { sendWhatsAppMessage, getWAConfig } from '@/lib/whatsapp';
+import { sendWhatsAppMessage, getTargetPhone, getWAConfig } from '@/lib/whatsapp';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -66,12 +66,13 @@ export async function POST(req: Request) {
       if (!alreadyAlertedRecently || totalUnknown % 5 === 0) {
         const phoneList = new Set<string>();
 
-        // 1. Prioritaskan nomor dari pengaturan WhatsApp
-        if (waConfig.targetPhone && waConfig.targetPhone.trim() !== '') {
-          phoneList.add(waConfig.targetPhone.trim());
+        // 1. Ambil target phone aktif dari konfigurasi WhatsApp
+        const dynamicPhone = await getTargetPhone();
+        if (dynamicPhone && dynamicPhone.trim() !== '') {
+          phoneList.add(dynamicPhone.trim());
         }
 
-        // 2. Ambil juga nomor telepon admin dari tabel rfid_cards (jika ada)
+        // 2. Ambil semua nomor telepon admin terdaftar di tabel rfid_cards
         const { data: adminCards } = await supabase
           .from('rfid_cards')
           .select('phone_number')
@@ -79,8 +80,15 @@ export async function POST(req: Request) {
 
         if (adminCards && adminCards.length > 0) {
           adminCards.forEach((admin) => {
-            if (admin.phone_number) phoneList.add(admin.phone_number.trim());
+            if (admin.phone_number && admin.phone_number.trim() !== '') {
+              phoneList.add(admin.phone_number.trim());
+            }
           });
+        }
+
+        // 3. Fallback nomor default jika belum ada yang tersimpan
+        if (phoneList.size === 0) {
+          phoneList.add('085792151560');
         }
 
         const alertMessage = 
@@ -91,12 +99,12 @@ export async function POST(req: Request) {
           `• Waktu Kejadian: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}\n\n` +
           `⚠️ *Mohon segera periksa celengan pintar Anda!*`;
 
-        let sentCount = 0;
+        const sentPhones: string[] = [];
         for (const phone of phoneList) {
           try {
             const sendRes = await sendWhatsAppMessage(phone, alertMessage);
             if (sendRes.success) {
-              sentCount++;
+              sentPhones.push(phone);
             }
           } catch (e) {
             console.error(`Gagal kirim WA ke ${phone}:`, e);
@@ -108,7 +116,7 @@ export async function POST(req: Request) {
           card_uid: uid,
           type: 'UNKNOWN_CARD_SPAM',
           attempts: totalUnknown,
-          detail: `Terkirim ke ${sentCount} nomor WhatsApp via Baileys`
+          detail: `Terkirim ke ${sentPhones.length} nomor WA: ${sentPhones.join(', ')} via Baileys`
         }]);
       }
     }
