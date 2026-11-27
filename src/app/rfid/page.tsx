@@ -30,15 +30,16 @@ export default function RfidPage() {
       setRfidLogs(logsData);
     }
 
-    // Fetch suspicious count today
+    // Fetch count percobaan tap kartu yang ditolak / tidak dikenal hari ini
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const { count: suspCount, error: suspError } = await supabase
-      .from('suspicious_activities')
+    const { count: unknownTodayCount, error: suspError } = await supabase
+      .from('rfid_events')
       .select('*', { count: 'exact', head: true })
+      .eq('event', 'unknown')
       .gte('created_at', today.toISOString());
       
-    if (!suspError) setSuspiciousCount(suspCount || 0);
+    if (!suspError) setSuspiciousCount(unknownTodayCount || 0);
 
     // Fetch registered cards
     const { data: cardsData, error: cardsError } = await supabase
@@ -146,8 +147,10 @@ export default function RfidPage() {
               {suspiciousCount} <span style={{ fontSize: "1rem", color: "#6b7280", fontWeight: 500 }}>percobaan</span>
             </div>
             <div className="balance-change" style={{ color: "#6b7280" }}>
-              {suspiciousCount > 0 ? (
+              {suspiciousCount > 4 ? (
                 <span style={{ color: "#ef4444", fontWeight: 600 }}>Waspada</span>
+              ) : suspiciousCount > 0 ? (
+                <span style={{ color: "#f59e0b", fontWeight: 600 }}>Perhatian</span>
               ) : (
                 <span style={{ color: "#10b981", fontWeight: 600 }}>Aman</span>
               )} hari ini
